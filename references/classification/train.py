@@ -4,7 +4,8 @@ import time
 
 import sys
 if 'torchvision' not in sys.path:
-    sys.path.append('/Users/discort/python/projects/torchvision/')
+    from pathlib import Path
+    sys.path.append(str(Path(os.path.abspath(__file__)).parent.parent.parent))
 
 import torch
 import torch.utils.data
