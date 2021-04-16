@@ -2,6 +2,10 @@ import datetime
 import os
 import time
 
+import sys
+if 'torchvision' not in sys.path:
+    sys.path.append('/Users/discort/python/projects/torchvision/')
+
 import torch
 import torch.utils.data
 from torch import nn
@@ -130,6 +134,42 @@ def load_data(traindir, valdir, args):
     return dataset, dataset_test, train_sampler, test_sampler
 
 
+def load_cifar(args):
+    print("Loading data")
+    resize_size, crop_size = (342, 299) if args.model == 'inception_v3' else (256, 224)
+
+    auto_augment_policy = getattr(args, "auto_augment", None)
+    random_erase_prob = getattr(args, "random_erase", 0.0)
+    dataset = torchvision.datasets.CIFAR10(
+        root='data',
+        train=True,
+        download=False,
+        transform=presets.ClassificationPresetTrain(
+            crop_size=crop_size,
+            auto_augment_policy=auto_augment_policy,
+            random_erase_prob=random_erase_prob))
+    dataset_test = torchvision.datasets.CIFAR10(
+        root='data',
+        train=False,
+        download=False,
+        transform=presets.ClassificationPresetEval(
+            crop_size=crop_size,
+            resize_size=resize_size))
+    print("Creating data loaders")
+    if args.distributed:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test)
+    else:
+        train_sampler = torch.utils.data.RandomSampler(dataset)
+        test_sampler = torch.utils.data.SequentialSampler(dataset_test)
+
+    return dataset, dataset_test, train_sampler, test_sampler
+
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
 def main(args):
     if args.apex and amp is None:
         raise RuntimeError("Failed to import apex. Please install apex from https://www.github.com/nvidia/apex "
@@ -145,9 +185,11 @@ def main(args):
 
     torch.backends.cudnn.benchmark = True
 
-    train_dir = os.path.join(args.data_path, 'train')
-    val_dir = os.path.join(args.data_path, 'val')
-    dataset, dataset_test, train_sampler, test_sampler = load_data(train_dir, val_dir, args)
+    # train_dir = os.path.join(args.data_path, 'train')
+    # val_dir = os.path.join(args.data_path, 'val')
+    # dataset, dataset_test, train_sampler, test_sampler = load_data(train_dir, val_dir, args)
+    dataset, dataset_test, train_sampler, test_sampler = load_cifar(args)
+    import pudb; pudb.set_trace()
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=args.batch_size,
         sampler=train_sampler, num_workers=args.workers, pin_memory=True)
@@ -158,6 +200,7 @@ def main(args):
 
     print("Creating model")
     model = torchvision.models.__dict__[args.model](pretrained=args.pretrained)
+    print('Number of parameters: ', count_parameters(model))
     model.to(device)
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
